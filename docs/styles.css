@@ -1,0 +1,91 @@
+:root { --bg:#0b0b0c; --card:#151518; --txt:#f2f2f2; --mut:#b8b8b8; --bd:#232323; }
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,Arial;background:var(--bg);color:var(--txt)}
+.container{max-width:1000px;margin:0 auto;padding:18px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
+h1{font-size:22px;margin:0}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+input,textarea{width:100%;padding:10px;border-radius:10px;border:1px solid var(--bd);background:#0f0f12;color:var(--txt)}
+textarea{min-height:90px;resize:vertical}
+button{padding:10px 12px;border-radius:10px;border:0;cursor:pointer;font-weight:700}
+.btn{background:#fff;color:#000}
+.btn2{background:transparent;color:var(--txt);border:1px solid #3a3a3a}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.small{color:var(--mut);font-size:14px}
+.price{color:#d7ff6a;font-weight:800}
+img.prod{width:100%;height:140px;object-fit:cover;border-radius:12px;border:1px solid var(--bd);background:#0d0d0f}
+
+/* ===== Status dos pedidos ===== */
+.badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-block;
+}
+
+.badge-novo {
+  background: #2c2c2c;
+  color: #fff;
+}
+
+.badge-preparando {
+  background: #f59e0b; /* amarelo */
+  color: #000;
+}
+
+.badge-saiu {
+  background: #3b82f6; /* azul */
+  color: #fff;
+}
+
+.badge-entregue {
+  background: #10b981; /* verde */
+  color: #000;
+}
+
+.badge-cancelado {
+  background: #ef4444; /* vermelho */
+  color: #fff;
+}
+
+/* ===== Destaque de pedido novo ===== */
+.order-new {
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 0 0 2px rgba(245,158,11,0.2);
+  animation: pulseNew 1.2s ease-in-out infinite;
+}
+
+@keyframes pulseNew {
+  0%   { transform: scale(1);   }
+  50%  { transform: scale(1.01);}
+  100% { transform: scale(1);   }
+}
+
+/* Badge base (se ainda não tiver) */
+.badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-block;
+}
+.badge-novo { background:#2c2c2c; color:#fff; }
+.badge-preparando { background:#f59e0b; color:#000; }
+.badge-saiu { background:#3b82f6; color:#fff; }
+.badge-entregue { background:#10b981; color:#000; }
+.badge-cancelado { background:#ef4444; color:#fff; }
+
+/* Destaque pedido novo */
+.pedido-novo {
+  border: 2px solid #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.6);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 8px rgba(245,158,11,.6); }
+  50% { box-shadow: 0 0 16px rgba(245,158,11,1); }
+  100% { box-shadow: 0 0 8px rgba(245,158,11,.6); }
+}

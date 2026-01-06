@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Status do Pedido</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #181818;
+      padding: 24px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+    }
+    .status {
+      margin-top: 16px;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 18px;
+    }
+    .approved { background: #0f5132; color: #d1e7dd; }
+    .pending  { background: #664d03; color: #fff3cd; }
+    .rejected { background: #842029; color: #f8d7da; }
+    .small { font-size: 14px; opacity: .8; margin-top: 10px; }
+    button {
+      margin-top: 20px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>📦 Pedido recebido</h1>
+
+  <div id="statusBox" class="status pending">
+    Consultando pagamento...
+  </div>
+
+  <div id="orderInfo" class="small"></div>
+
+  <button onclick="location.href='loja.html'">
+    Voltar para loja
+  </button>
+</div>
+
+<script>
+const SUPABASE_URL = "https://anbovljwbvljfhlydsxo.supabase.co";
+const ORDER_STATUS_FN = `${SUPABASE_URL}/functions/v1/order-status`;
+
+const params = new URLSearchParams(location.search);
+const orderId = params.get("order_id");
+
+const statusBox = document.getElementById("statusBox");
+const orderInfo = document.getElementById("orderInfo");
+
+if (!orderId) {
+  statusBox.textContent = "Pedido inválido";
+  statusBox.className = "status rejected";
+} else {
+  loadStatus();
+}
+
+async function loadStatus() {
+  try {
+    const res = await fetch(`${ORDER_STATUS_FN}?order_id=${orderId}`);
+    const data = await res.json();
+
+    if (!data.ok) throw new Error();
+
+    orderInfo.textContent = `Pedido: ${orderId}`;
+
+    if (data.payment_status === "paid" || data.payment_status === "approved") {
+      statusBox.textContent = "✅ Pagamento aprovado! Pedido em preparo";
+      statusBox.className = "status approved";
+    } else if (data.payment_status === "pending") {
+      statusBox.textContent = "⏳ Pagamento pendente";
+      statusBox.className = "status pending";
+      setTimeout(loadStatus, 5000);
+    } else {
+      statusBox.textContent = "❌ Pagamento recusado";
+      statusBox.className = "status rejected";
+    }
+  } catch {
+    statusBox.textContent = "Erro ao consultar pedido";
+    statusBox.className = "status rejected";
+  }
+}
+</script>
+
+</body>
+</html>

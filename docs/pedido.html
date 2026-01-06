@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Status do Pedido</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    .center { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+    .box { width: 520px; max-width: 100%; background:#111; border:1px solid #232323; border-radius:16px; padding:22px; }
+    .title { font-size:28px; margin:0 0 12px; }
+    .pill { padding:14px 16px; border-radius:12px; font-weight:700; text-align:center; margin:14px 0; }
+    .muted { opacity:.85; font-size:14px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+    .btn { padding:10px 14px; border-radius:10px; border:0; cursor:pointer; }
+    .btn2 { padding:10px 14px; border-radius:10px; border:1px solid #333; background:transparent; cursor:pointer; color:#fff; }
+    .ok { background:#1f8f3a; }
+    .pend { background:#b58800; }
+    .bad { background:#a12a2a; }
+    .small { font-size:13px; opacity:.85; }
+    code { background:#000; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div class="center">
+    <div class="box">
+      <h1 class="title">Pedido recebido</h1>
+
+      <div id="pill" class="pill pend">Verificando pagamento…</div>
+
+      <div class="muted">
+        Pedido: <code id="orderIdTxt">-</code>
+      </div>
+
+      <div id="details" class="small" style="margin-top:10px;"></div>
+
+      <div class="row">
+        <button class="btn2" id="btnStore">Voltar para loja</button>
+        <button class="btn2" onclick="forceRefresh()">Atualizar agora</button>
+      </div>
+
+      <div class="small" style="margin-top:10px;">
+        <span id="lastCheck">Aguardando…</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ✅ seu projeto supabase
+  const SUPABASE_PROJECT_URL = "https://anbovljwbvljfhlydsxo.supabase.co";
+  const ORDER_STATUS_URL = `${SUPABASE_PROJECT_URL}/functions/v1/order-status`;
+
+  const params = new URLSearchParams(location.search);
+  const orderIdFromUrl = params.get("order_id");
+  const orderIdFromLs = localStorage.getItem("last_order_id");
+  const orderId = orderIdFromUrl || orderIdFromLs;
+
+  const storeSlug = params.get("slug") || localStorage.getItem("last_store_slug") || "";
+
+  const pill = document.getElementById("pill");
+  const orderIdTxt = document.getElementById("orderIdTxt");
+  const details = document.getElementById("details");
+  const lastCheck = document.getElementById("lastCheck");
+  const btnStore = document.getElementById("btnStore");
+
+  btnStore.onclick = () => {
+    const url = "./loja.html" + (storeSlug ? ("?slug=" + encodeURIComponent(storeSlug)) : "");
+    location.href = url;
+  };
+
+  if (!orderId) {
+    pill.className = "pill bad";
+    pill.textContent = "Pedido não encontrado";
+    details.textContent = "Abra esta página com ?order_id=SEU_UUID (ou gere um pedido pelo checkout).";
+  } else {
+    orderIdTxt.textContent = orderId;
+    startPolling();
+  }
+
+  let timer = null;
+
+  function setState(type, text) {
+    pill.className = "pill " + type;
+    pill.textContent = text;
+  }
+
+  function nowStr() {
+    const d = new Date();
+    return d.toLocaleTimeString();
+  }
+
+  async function fetchStatus() {
+    lastCheck.textContent = "Consultando status… " + nowStr();
+
+    const res = await fetch(`${ORDER_STATUS_URL}?order_id=${encodeURIComponent(orderId)}`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      setState("bad", "Erro ao consultar pedido");
+      details.textContent = JSON.stringify(data, null, 2);
+      lastCheck.textContent = "Última tentativa: " + nowStr();
+      return null;
+    }
+
+    lastCheck.textContent = "Última verificação: " + nowStr();
+    return data;
+  }
+
+  function brlFromCents(cents){
+    const v = Number(cents || 0) / 100;
+    return "R$ " + v.toFixed(2).replace(".", ",");
+  }
+
+  function renderStatus(data) {
+    const ps = (data?.payment_status || "pending").toLowerCase();
+    const st = (data?.status || "novo").toLowerCase();
+
+    // ✅ NOVO: pagar na entrega
+    const payOnDelivery = data?.pay_on_delivery === true;
+
+    // ✅ TRATE "paid" COMO APROVADO
+    const isPaid = (ps === "paid" || ps === "approved");
+    const isPending = (ps === "pending" || ps === "in_process");
+    const isRejected = (ps === "rejected" || ps === "cancelled" || ps === "refunded" || ps === "charged_back");
+
+    // ✅ Se for "pagar na entrega", não é pendente MP
+    if (payOnDelivery) {
+      setState("ok", "Pagamento na entrega ✅");
+      details.innerHTML = `
+        <div>Status do pagamento: <b>na entrega</b></div>
+        <div>Etapa do pedido: <b>${st}</b></div>
+        <div>Total: <b>${brlFromCents(data.total_cents)}</b></div>
+        <div style="margin-top:8px"><b>Você vai pagar no ato da entrega 💵</b></div>
+      `;
+      // ✅ não precisa ficar consultando Mercado Pago
+      stopPolling();
+      return;
+    }
+
+    if (isPaid) {
+      setState("ok", "Pagamento aprovado ✅");
+      details.innerHTML = `
+        <div>Status do pagamento: <b>${ps}</b></div>
+        <div>Etapa do pedido: <b>${st}</b></div>
+        <div>Total: <b>${brlFromCents(data.total_cents)}</b></div>
+        <div style="margin-top:8px"><b>Agora a loja vai preparar seu pedido 🍔</b></div>
+      `;
+      // ✅ quando já está pago, pode parar de consultar (opcional)
+      stopPolling();
+      return;
+    }
+
+    if (isRejected) {
+      setState("bad", "Pagamento recusado ❌");
+      details.innerHTML = `
+        <div>Status do pagamento: <b>${ps}</b></div>
+        <div>Etapa do pedido: <b>${st}</b></div>
+        <div style="margin-top:8px">Tente novamente ou escolha outro meio de pagamento.</div>
+      `;
+      stopPolling();
+      return;
+    }
+
+    // default pendente (Mercado Pago)
+    setState("pend", "Pagamento pendente ⏳");
+    details.innerHTML = `
+      <div>Status do pagamento: <b>${ps}</b></div>
+      <div>Etapa do pedido: <b>${st}</b></div>
+      <div style="margin-top:8px">Aguardando confirmação do Mercado Pago…</div>
+    `;
+  }
+
+  async function tick() {
+    const data = await fetchStatus();
+    if (data) renderStatus(data);
+  }
+
+  function startPolling() {
+    tick();
+    timer = setInterval(tick, 3000);
+  }
+
+  function stopPolling() {
+    if (timer) clearInterval(timer);
+    timer = null;
+  }
+
+  function forceRefresh() {
+    tick();
+  }
+</script>
+</body>
+</html>

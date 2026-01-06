@@ -1,0 +1,297 @@
+<!doctype html><html lang="pt-br">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cardápio</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+
+<div id="trackBox" class="card" style="display:none;margin-bottom:12px">
+  <h1 style="font-size:18px;margin:0 0 10px 0">Meu pedido</h1>
+  <p class="small" style="margin:0 0 10px 0">
+    
+  </p>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn" id="btnTrack">📦 Acompanhar meu pedido</button>
+    <button class="btn2" id="btnClearTrack">Limpar</button>
+  </div>
+</div>
+
+
+<body>
+
+  
+<div class="container">
+  <header style="align-items:flex-start">
+    <div>
+      <h1 id="title">Cardápio</h1>
+      <div class="small" id="subtitle"></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button class="btn2" onclick="toggleCart()">Carrinho (<span id="cartCount">0</span>)</button>
+    </div>
+  </header>
+
+  <div class="card" id="cartBox" style="display:nome;margin-bottom:12px">
+    <h1 style="font-size:18px;margin:0 0 10px 0">Seu carrinho</h1>
+
+    <div id="cartItems" class="small"></div>
+
+    <div style="margin-top:10px;border-top:1px solid #232323;padding-top:10px">
+      <div class="small">Subtotal: <b id="subTotal">R$ 0,00</b></div>
+      <div class="small">Entrega: <b id="deliveryFee">R$ 0,00</b></div>
+      <div class="small" style="margin-top:6px;font-size:16px">Total: <b id="total">R$ 0,00</b></div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn2" onclick="clearCart()">Limpar</button>
+      <button class="btn" onclick="goCheckout()">Finalizar pedido</button>
+      <button class="btn2" onclick="toggleCart()">Fechar</button>
+    </div>
+  </div>
+
+  <div class="grid" id="list"></div>
+</div>
+
+<script>
+let store = null;
+let products = [];
+let cart = []; // {id, name, price_cents, qty}
+
+function qs(k){ return new URLSearchParams(location.search).get(k); }
+function setText(sel, val){ document.querySelector(sel).textContent = val; }
+
+function loadCart(){
+  try { cart = JSON.parse(localStorage.getItem("cart") || "[]"); }
+  catch { cart = []; }
+  setText("#cartCount", cart.reduce((a,i)=>a+i.qty,0));
+}
+function saveCart(){
+  localStorage.setItem("cart", JSON.stringify(cart));
+  setText("#cartCount", cart.reduce((a,i)=>a+i.qty,0));
+}
+
+function addToCartItem(id, name, price_cents){
+  const it = cart.find(i => i.id === id);
+  if (it) it.qty += 1;
+  else cart.push({ id, name, price_cents, qty: 1 });
+  saveCart();
+}
+
+function removeOne(id){
+  const it = cart.find(i => i.id === id);
+  if (!it) return;
+  it.qty -= 1;
+  if (it.qty <= 0) cart = cart.filter(i => i.id !== id);
+  saveCart();
+  renderCart();
+}
+
+function addMore(id){
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  addToCartItem(p.id, p.name, p.price_cents);
+  renderCart();
+}
+
+function toggleCart(){
+  const box = document.querySelector("#cartBox");
+  box.style.display = (box.style.display === "none") ? "block" : "none";
+  if (box.style.display === "block") renderCart();
+}
+
+function clearCart(){
+  cart = [];
+  saveCart();
+  renderCart();
+}
+
+function calc(){
+  const subtotal = cart.reduce((a,i)=>a + i.price_cents*i.qty, 0);
+  const fee = store ? (store.delivery_fee_cents || 500) : 500;
+  const total = subtotal + fee;
+  return { subtotal, fee, total };
+}
+
+function renderCart(){
+  const box = document.querySelector("#cartItems");
+
+  if (!cart.length){
+    box.innerHTML = "<div>Seu carrinho está vazio.</div>";
+    const fee = store?.delivery_fee_cents || 500;
+    setText("#subTotal", money(0));
+    setText("#deliveryFee", money(fee));
+    setText("#total", money(fee));
+    return;
+  }
+
+  box.innerHTML = cart.map(i => `
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #232323">
+      <div>
+        <b>${i.name}</b><br>
+        <span>${money(i.price_cents)} x ${i.qty}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn2" onclick="removeOne('${i.id}')">-</button>
+        <button class="btn2" onclick="addMore('${i.id}')">+</button>
+      </div>
+    </div>
+  `).join("");
+
+  const { subtotal, fee, total } = calc();
+  setText("#subTotal", money(subtotal));
+  setText("#deliveryFee", money(fee));
+  setText("#total", money(total));
+}
+
+function goCheckout(){
+  if (!cart.length) return alert("Seu carrinho está vazio.");
+    if (store && store.is_open === false) {
+    alert("A loja está fechada no momento. Volte no horário de funcionamento.");
+    return;
+  }
+  
+
+  const payload = {
+    store_id: store.id,
+    store_slug: store.slug,
+    items: cart,
+    delivery_fee_cents: store.delivery_fee_cents || 500
+  };
+  localStorage.setItem("checkout_payload", JSON.stringify(payload));
+  location.href = "./checkout.html";
+}
+
+/** ✅ gera Signed URL (funciona com bucket privado) */
+async function attachSignedUrls(list){
+  const out = [];
+  for (const p of list){
+    let imgUrl = "";
+    if (p.image_path){
+      const { data, error } = await sb
+        .storage
+        .from("product-images")
+        .createSignedUrl(p.image_path, 60 * 60); // 1h
+
+      if (!error && data?.signedUrl) {
+        imgUrl = data.signedUrl + (data.signedUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
+      }
+    }
+    out.push({ ...p, _imgUrl: imgUrl });
+  }
+  return out;
+}
+
+async function loadStoreAndProducts(){
+  const slug = qs("slug");
+  if (!slug) {
+    document.querySelector("#list").innerHTML =
+      `<div class="card">Faltou o <b>slug</b> na URL. Ex: <code>loja.html?slug=minha-loja</code></div>`;
+    return;
+  }
+
+  const { data: s, error: e1 } = await sb
+    .from("stores")
+    .select("*")
+    .eq("slug", slug)
+    .single();
+
+  if (e1) {
+    document.querySelector("#list").innerHTML =
+      `<div class="card">Loja não encontrada (slug: <b>${slug}</b>).</div>`;
+    return;
+  }
+
+  store = s;
+  document.title = store.name;
+  setText("#title", store.name);
+  setText("#subtitle", `Taxa de entrega: ${money(store.delivery_fee_cents || 500)}`);
+
+  const { data: ps, error: e2 } = await sb
+    .from("products")
+    .select("id, name, description, price_cents, image_path")
+    .eq("store_id", store.id)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
+
+  if (e2) {
+    document.querySelector("#list").innerHTML =
+      `<div class="card">Erro ao carregar produtos: ${e2.message}</div>`;
+    return;
+  }
+
+  products = await attachSignedUrls(ps || []);
+  renderProducts();
+}
+
+function renderProducts(){
+  const el = document.querySelector("#list");
+
+  if (!products.length) {
+    el.innerHTML = `<div class="card">Nenhum produto ativo ainda.</div>`;
+    return;
+  }
+
+  el.innerHTML = products.map(p => {
+    const safeId = String(p.id).replace(/"/g,"&quot;");
+    const safeName = String(p.name).replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const imgSrc = p._imgUrl || "";
+
+    return `
+      <div class="card">
+        <img class="prod" src="${imgSrc}" alt="" onerror="this.style.display='none'">
+        <div style="margin-top:10px;font-weight:800">${safeName}</div>
+        <div class="small">${p.description || ""}</div>
+        <div class="price" style="margin-top:8px">${money(p.price_cents)}</div>
+
+        <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn" onclick='addToCartItem("${safeId}", ${JSON.stringify(p.name).replace(/'/g,"&#39;")}, ${p.price_cents})'>Adicionar</button>
+          <button class="btn2" onclick="toggleCart()">Ver carrinho</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+loadCart();
+loadStoreAndProducts();
+
+
+
+</script>
+
+<script>
+(function(){
+  const box = document.getElementById("trackBox");
+  const btn = document.getElementById("btnTrack");
+  const btnClear = document.getElementById("btnClearTrack");
+
+  const orderId = localStorage.getItem("last_order_id");
+  const slug = localStorage.getItem("last_store_slug") || "";
+
+  if (orderId && box && btn) {
+    box.style.display = "block";
+
+    btn.onclick = () => {
+      location.href = "./pedido.html?order_id=" + encodeURIComponent(orderId) +
+                      "&slug=" + encodeURIComponent(slug);
+    };
+  }
+
+  if (btnClear) {
+    btnClear.onclick = () => {
+      localStorage.removeItem("last_order_id");
+      localStorage.removeItem("last_store_slug");
+      location.reload();
+    };
+  }
+})();
+</script>
+
+
+
+
+</body></html>

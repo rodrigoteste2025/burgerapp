@@ -1,0 +1,50 @@
+<!doctype html><html lang="pt-br">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin - Login</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="container">
+    <header><h1>Login do Admin</h1></header>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label class="small">Email</label>
+          <input id="email" type="email" placeholder="admin@hamburgueria.com">
+        </div>
+        <div>
+          <label class="small">Senha</label>
+          <input id="pass" type="password" placeholder="********">
+        </div>
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:10px">
+        <button class="btn" onclick="login()">Entrar</button>
+        <button class="btn2" onclick="logout()">Sair</button>
+      </div>
+
+      <p class="small" id="msg"></p>
+    </div>
+  </div>
+
+<script>
+async function login(){
+  const email = document.querySelector("#email").value.trim();
+  const password = document.querySelector("#pass").value.trim();
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return document.querySelector("#msg").textContent = "Erro: " + error.message;
+
+  location.href = "./admin-produtos.html";
+}
+
+async function logout(){
+  await sb.auth.signOut();
+  document.querySelector("#msg").textContent = "Saiu.";
+}
+</script>
+</body></html>

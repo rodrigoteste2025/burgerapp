@@ -1,0 +1,405 @@
+<!doctype html><html lang="pt-br">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin - Produtos</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Produtos</h1>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <!-- Ver Loja agora abre o mesmo link do "Abrir Cardápio" (com slug e /public quando necessário) -->
+      <a class="btn2" href="./loja.html"
+         onclick="event.preventDefault(); document.querySelector('#publicLink').click();"
+         style="text-decoration:none;padding:10px 12px;border-radius:10px;display:inline-block">
+        Ver Loja
+      </a>
+
+      <a class="btn2" href="./admin-pedidos.html"
+         style="text-decoration:none;padding:10px 12px;border-radius:10px;display:inline-block">
+        Pedidos
+      </a>
+
+      <button class="btn2" onclick="signOut()">Sair</button>
+    </div>
+  </header>
+
+  <div class="card" style="margin-bottom:12px">
+    <h1 style="font-size:18px;margin:0 0 10px 0">Minha Loja</h1>
+
+    <div class="row">
+      <div>
+        <label class="small">Nome</label>
+        <input id="storeName" placeholder="Minha Hamburgueria">
+      </div>
+      <div>
+        <label class="small">Slug (link público)</label>
+        <input id="storeSlug" placeholder="meu-burger">
+      </div>
+    </div>
+
+    <div style="margin-top:10px" class="row">
+      <div>
+        <label class="small">Taxa entrega (R$)</label>
+        <input id="fee" type="number" value="5" step="0.01">
+      </div>
+
+      <div style="margin-top:12px">
+        <label class="small">Status da loja</label>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+          <span id="storeStatus" class="badge">Carregando...</span>
+          <button class="btn2" id="toggleStoreBtn">...</button>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:end;gap:10px;flex-wrap:wrap">
+        <button class="btn" onclick="saveStore()">Salvar Loja</button>
+
+        <a id="publicLink" class="btn2" target="_blank"
+           style="text-decoration:none;padding:10px 12px;border-radius:10px;display:inline-block">
+           Abrir Cardápio
+        </a>
+      </div>
+    </div>
+
+    <p class="small" style="margin:10px 0 0 0">Link: <span id="linkText"></span></p>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <h1 style="font-size:18px;margin:0 0 10px 0">Novo Produto</h1>
+
+    <div class="row">
+      <div>
+        <label class="small">Nome</label>
+        <input id="pName" placeholder="X-Burger">
+      </div>
+      <div>
+        <label class="small">Preço (R$)</label>
+        <input id="pPrice" type="number" step="0.01" placeholder="29.90">
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="small">Descrição</label>
+      <textarea id="pDesc" placeholder="Descrição..."></textarea>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="small">Foto (upload)</label>
+      <input id="pImg" type="file" accept="image/*">
+      <div class="small" style="margin-top:6px">
+        A foto será salva em: <code>{store_id}/{product_id}.ext</code>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="createProduct()">Cadastrar</button>
+      <span class="small" id="msg"></span>
+    </div>
+  </div>
+
+  <div class="grid" id="list"></div>
+</div>
+
+<script>
+let store = null;
+
+async function signOut() {
+  await sb.auth.signOut();
+  location.href = "./admin-login.html";
+}
+
+function slugify(s){
+  return String(s).toLowerCase().trim()
+    .replace(/[^\w\s-]/g,"")
+    .replace(/\s+/g,"-")
+    .replace(/-+/g,"-");
+}
+
+function setMsg(t){ document.querySelector("#msg").textContent = t || ""; }
+
+/* ✅ ADICIONADO: render do status (badge + botão) */
+function renderStoreStatus(){
+  const badge = document.querySelector("#storeStatus");
+  const btn = document.querySelector("#toggleStoreBtn");
+  if (!badge || !btn) return;
+
+  if (!store) {
+    badge.textContent = "Loja não carregada";
+    btn.textContent = "...";
+    btn.disabled = true;
+    return;
+  }
+
+  // padrão: se não existir a coluna, assume aberto
+  const isOpen = (store.is_open !== false);
+
+  badge.textContent = isOpen ? "Aberta" : "Fechada";
+  btn.textContent = isOpen ? "Fechar loja" : "Abrir loja";
+  btn.disabled = false;
+}
+
+/* ✅ ADICIONADO: toggle abrir/fechar */
+async function toggleStoreOpen(){
+  if (!store) return;
+
+  const btn = document.querySelector("#toggleStoreBtn");
+  const badge = document.querySelector("#storeStatus");
+
+  try{
+    btn.disabled = true;
+    btn.textContent = "Salvando...";
+    badge.textContent = "Atualizando...";
+
+    const next = !(store.is_open !== false);
+
+    const { data, error } = await sb
+      .from("stores")
+      .update({ is_open: next })
+      .eq("id", store.id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    store = data;
+    renderStoreStatus();
+  }catch(e){
+    alert(e?.message || e);
+    renderStoreStatus();
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+/* ✅ ADICIONADO: conecta o botão */
+document.addEventListener("click", (ev) => {
+  const t = ev.target;
+  if (t && t.id === "toggleStoreBtn") toggleStoreOpen();
+});
+
+async function ensureStore(){
+  await mustAuth();
+  const { data: sess } = await sb.auth.getSession();
+  const uid = sess.session.user.id;
+
+  const { data: stores, error } = await sb
+    .from("stores")
+    .select("*")
+    .eq("owner_id", uid)
+    .limit(1);
+
+  if (error) throw error;
+
+  if (stores && stores.length) {
+    store = stores[0];
+  } else {
+    const defName = "Minha Hamburgueria";
+    const defSlug = "minha-hamburgueria-" + uid.slice(0,6);
+
+    const { data, error: insErr } = await sb
+      .from("stores")
+      .insert({ owner_id: uid, name: defName, slug: defSlug, delivery_fee_cents: 500 })
+      .select("*")
+      .single();
+
+    if (insErr) throw insErr;
+    store = data;
+  }
+
+  document.querySelector("#storeName").value = store.name;
+  document.querySelector("#storeSlug").value = store.slug;
+  document.querySelector("#fee").value = (store.delivery_fee_cents/100).toFixed(2);
+
+  // ✅ CORREÇÃO: se você está abrindo arquivos via /public/, gere o link com /public também
+  const base = location.pathname.includes("/public/") ? `${location.origin}/public` : location.origin;
+  const publicUrl = `${base}/loja.html?slug=${encodeURIComponent(store.slug)}`;
+
+  document.querySelector("#publicLink").href = publicUrl;
+  document.querySelector("#linkText").textContent = publicUrl;
+
+  /* ✅ ADICIONADO: para não ficar "Carregando..." */
+  renderStoreStatus();
+}
+
+async function saveStore(){
+  if (!store) return;
+
+  const name = document.querySelector("#storeName").value.trim();
+  let slug = document.querySelector("#storeSlug").value.trim();
+  const fee = Number(document.querySelector("#fee").value || 5);
+
+  if (!name) return alert("Nome obrigatório");
+  if (!slug) slug = slugify(name);
+
+  setMsg("Salvando loja...");
+
+  const { data, error } = await sb
+    .from("stores")
+    .update({ name, slug, delivery_fee_cents: Math.round(fee * 100) })
+    .eq("id", store.id)
+    .select("*")
+    .single();
+
+  if (error) return alert(error.message);
+
+  store = data;
+  renderStoreStatus();
+  await ensureStore();
+  setMsg("Loja salva ✅");
+}
+
+/** Upload + URL pública (salva no banco) */
+async function uploadImage(file, productId){
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${store.id}/${productId}.${ext}`;
+
+  const { error } = await sb
+    .storage
+    .from("product-images")
+    .upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
+
+  if (error) throw error;
+
+  const { data } = sb.storage.from("product-images").getPublicUrl(path);
+  return { path, url: data.publicUrl };
+}
+
+async function createProduct(){
+  if (!store) return alert("Loja não carregada");
+
+  const name = document.querySelector("#pName").value.trim();
+  const desc = document.querySelector("#pDesc").value.trim();
+  const price = Number(document.querySelector("#pPrice").value || 0);
+  const file = document.querySelector("#pImg").files[0];
+
+  if (!name) return alert("Nome obrigatório");
+  if (price <= 0) return alert("Preço inválido");
+  if (!file) return alert("Escolha uma foto");
+
+  setMsg("Criando produto...");
+
+  const { data: prod, error } = await sb
+    .from("products")
+    .insert({
+      store_id: store.id,
+      name,
+      description: desc,
+      price_cents: Math.round(price * 100),
+      is_active: true
+    })
+    .select("*")
+    .single();
+
+  if (error) return alert(error.message);
+
+  try {
+    setMsg("Enviando imagem...");
+    const img = await uploadImage(file, prod.id);
+
+    const { error: upErr } = await sb
+      .from("products")
+      .update({ image_path: img.path, image_url: img.url })
+      .eq("id", prod.id);
+
+    if (upErr) return alert(upErr.message);
+
+    document.querySelector("#pName").value = "";
+    document.querySelector("#pDesc").value = "";
+    document.querySelector("#pPrice").value = "";
+    document.querySelector("#pImg").value = "";
+
+    setMsg("Produto cadastrado ✅");
+    await loadProducts();
+  } catch (e) {
+    await sb.from("products").delete().eq("id", prod.id);
+    alert("Erro no upload: " + (e?.message || e));
+    setMsg("");
+  }
+}
+
+async function toggleActive(id, is_active){
+  const { error } = await sb.from("products").update({ is_active: !is_active }).eq("id", id);
+  if (error) return alert(error.message);
+  await loadProducts();
+}
+
+async function delProduct(id, image_path){
+  if (!confirm("Excluir produto?")) return;
+
+  if (image_path) {
+    const { error: remErr } = await sb.storage.from("product-images").remove([image_path]);
+    if (remErr) console.warn("Erro ao remover imagem:", remErr.message);
+  }
+
+  const { error } = await sb.from("products").delete().eq("id", id);
+  if (error) return alert(error.message);
+
+  await loadProducts();
+}
+
+/** ✅ Render via Signed URL (imagem OK) */
+async function loadProducts(){
+  const { data, error } = await sb
+    .from("products")
+    .select("*")
+    .eq("store_id", store.id)
+    .order("created_at", { ascending: false });
+
+  if (error) return alert(error.message);
+
+  const el = document.querySelector("#list");
+  el.innerHTML = "";
+
+  for (const p of (data || [])) {
+    const div = document.createElement("div");
+    div.className = "card";
+
+    let imgSrc = "";
+    if (p.image_path) {
+      const { data: signed, error: signErr } = await sb
+        .storage
+        .from("product-images")
+        .createSignedUrl(p.image_path, 60 * 60);
+
+      if (!signErr && signed?.signedUrl) {
+        imgSrc = signed.signedUrl + "&t=" + Date.now();
+      }
+    }
+
+    div.innerHTML = `
+      <img class="prod" src="${imgSrc}" alt="">
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:10px;align-items:flex-start">
+        <div>
+          <div style="font-weight:800">${p.name}</div>
+          <div class="small">${p.description || ""}</div>
+          <div class="price" style="margin-top:6px">${money(p.price_cents)}</div>
+          <div class="small" style="margin-top:6px">
+            Status: <span class="badge">${p.is_active ? "Ativo" : "Inativo"}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn2" onclick='toggleActive("${p.id}", ${p.is_active})'>Ativar/Desativar</button>
+        <button class="btn2" onclick='delProduct("${p.id}", "${p.image_path || ""}")'>Excluir</button>
+      </div>
+    `;
+    el.appendChild(div);
+  }
+}
+
+(async function init(){
+  try {
+    await ensureStore();
+    await loadProducts();
+  } catch (e) {
+    alert(e?.message || e);
+  }
+})();
+</script>
+</body></html>

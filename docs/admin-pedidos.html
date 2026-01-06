@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin - Pedidos</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+
+<audio id="notifySound" preload="auto">
+  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+</audio>
+
+<body>
+<div class="container">
+  <header>
+    <h1>Pedidos</h1>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <a class="btn2" href="./admin-produtos.html">Produtos</a>
+      <button class="btn2" onclick="reload(true)">Atualizar</button>
+      <button class="btn2" onclick="toggleSound()" id="soundBtn">Ativar som</button>
+      <button class="btn2" onclick="signOut()">Sair</button>
+    </div>
+  </header>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="row">
+      <div>
+        <label class="small">Filtrar por status</label>
+        <select id="statusFilter" onchange="reload(true)">
+          <option value="">Todos</option>
+          <option value="novo">Novo</option>
+          <option value="preparando">Preparando</option>
+          <option value="saiu">Saiu para entrega</option>
+          <option value="entregue">Entregue</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </div>
+      <div>
+        <label class="small">Buscar (nome/telefone)</label>
+        <input id="q" placeholder="Ex: antonio" oninput="debouncedReload()">
+      </div>
+    </div>
+    <p class="small" id="hint"></p>
+    <p class="small" id="auto"></p>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+let store = null;
+let tmr = null;
+let soundEnabled = localStorage.getItem("sound_enabled") === "1";
+let audioCtx = null;
+
+function updateSoundBtn(){
+  document.querySelector("#soundBtn").textContent =
+    soundEnabled ? "Som ativado ✅" : "Ativar som";
+}
+
+function toggleSound(){
+  soundEnabled = !soundEnabled;
+  localStorage.setItem("sound_enabled", soundEnabled ? "1" : "0");
+  updateSoundBtn();
+  if (soundEnabled && !audioCtx)
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function beep(){
+  if (!soundEnabled) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = 880;
+    g.gain.value = 0.08;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    setTimeout(() => o.stop(), 180);
+  } catch {}
+}
+
+function debouncedReload(){
+  clearTimeout(tmr);
+  tmr = setTimeout(()=>reload(true), 350);
+}
+
+async function signOut(){
+  await sb.auth.signOut();
+  location.href = "./admin-login.html";
+}
+
+async function ensureStore(){
+  await mustAuth();
+  const { data: sess } = await sb.auth.getSession();
+  const uid = sess.session.user.id;
+
+  const { data, error } = await sb
+    .from("stores")
+    .select("*")
+    .eq("owner_id", uid)
+    .limit(1);
+
+  if (error || !data?.length) throw new Error("Loja não encontrada.");
+  store = data[0];
+
+  document.querySelector("#hint").textContent =
+    `Loja: ${store.name} — pedidos pagos ou na entrega.`;
+}
+
+function badge(status){
+  const map = {
+    novo: "Novo",
+    preparando: "Preparando",
+    saiu: "Saiu para entrega",
+    entregue: "Entregue",
+    cancelado: "Cancelado"
+  };
+  return `<span class="badge badge-${status}">${map[status] || status}</span>`;
+}
+
+function fmtDate(iso){
+  return new Date(iso).toLocaleString("pt-BR");
+}
+
+async function setStatus(orderId, status){
+  const { error } = await sb.from("orders").update({ status }).eq("id", orderId);
+  if (error) alert(error.message);
+  reload(true);
+}
+
+async function reload(userAction=false){
+  if (!store) return;
+
+  const status = document.querySelector("#statusFilter").value;
+  const q = document.querySelector("#q").value.trim().toLowerCase();
+
+  let query = sb
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("store_id", store.id)
+    .or("payment_status.eq.paid,pay_on_delivery.eq.true")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (status) query = query.eq("status", status);
+
+  const { data, error } = await query;
+  if (error) return alert(error.message);
+
+  let rows = data || [];
+  if (q){
+    rows = rows.filter(o =>
+      (o.customer_name || "").toLowerCase().includes(q) ||
+      (o.customer_phone || "").toLowerCase().includes(q)
+    );
+  }
+
+  render(rows);
+  document.querySelector("#auto").textContent =
+    `Auto atualização: 10s • Som: ${soundEnabled ? "ON" : "OFF"}`;
+}
+
+function render(rows){
+  const el = document.querySelector("#list");
+  if (!rows.length){
+    el.innerHTML = `<div class="card">Nenhum pedido encontrado.</div>`;
+    return;
+  }
+
+  el.innerHTML = rows.map(o => {
+    const items = (o.order_items || []).map(i =>
+      `<div class="small">• ${i.name} — ${money(i.price_cents)} x ${i.qty}</div>`
+    ).join("");
+
+    return `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap">
+          <div>
+            <b>Pedido ${o.id.slice(0,6)}</b> • ${badge(o.status)}
+            <div class="small">Criado em: ${fmtDate(o.created_at)}</div>
+          </div>
+          <div style="text-align:right">
+            <b>${money(o.total_cents)}</b>
+            <div class="small">Entrega: ${money(o.delivery_fee_cents)}</div>
+          </div>
+        </div>
+
+        <div class="small"><b>Cliente:</b> ${o.customer_name}</div>
+        <div class="small"><b>Telefone:</b> ${o.customer_phone}</div>
+        <div class="small"><b>Endereço:</b> ${o.address}</div>
+
+        <div class="small">
+          <b>Pagamento:</b>
+          ${o.pay_on_delivery ? "Na entrega (Dinheiro)" : "Online"}
+        </div>
+
+        ${o.pay_on_delivery ? `
+          <div class="small">
+            <b>Troco para:</b>
+            ${o.cash_change_cents ? money(o.cash_change_cents) : "Não precisa"}
+          </div>
+        ` : ""}
+
+        <div style="margin-top:8px"><b>Itens</b>${items}</div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn2" onclick="setStatus('${o.id}','novo')">Novo</button>
+          <button class="btn2" onclick="setStatus('${o.id}','preparando')">Preparando</button>
+          <button class="btn2" onclick="setStatus('${o.id}','saiu')">Saiu</button>
+          <button class="btn2" onclick="setStatus('${o.id}','entregue')">Entregue</button>
+          <button class="btn2" onclick="setStatus('${o.id}','cancelado')">Cancelar</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+(async function init(){
+  try{
+    await ensureStore();
+    updateSoundBtn();
+    await reload(true);
+    setInterval(()=>reload(false), 10000);
+  }catch(e){
+    alert(e.message);
+  }
+})();
+
+</script>
+</body>
+</html>

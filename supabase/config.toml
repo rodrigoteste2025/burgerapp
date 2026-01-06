@@ -1,0 +1,17 @@
+[functions.mp-create-preference]
+enabled = true
+verify_jwt = false
+import_map = "./functions/mp-create-preference/deno.json"
+entrypoint = "./functions/mp-create-preference/index.ts"
+
+[functions.mp-webhook]
+enabled = true
+verify_jwt = false
+import_map = "./functions/mp-webhook/deno.json"
+entrypoint = "./functions/mp-webhook/index.ts"
+
+[functions.order-status]
+enabled = true
+verify_jwt = false
+import_map = "./functions/order-status/deno.json"
+entrypoint = "./functions/order-status/index.ts"

@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Checkout</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Finalizar pedido</h1>
+    <a class="btn2" id="btnBack" href="./loja.html" style="text-decoration:none;padding:10px 12px;border-radius:10px;display:inline-block">Voltar</a>
+  </header>
+
+  <div class="card" style="margin-bottom:12px">
+    <h1 style="font-size:18px;margin:0 0 10px 0">Dados do cliente</h1>
+
+    <div class="row">
+      <div>
+        <label class="small">Nome</label>
+        <input id="name" placeholder="Seu nome">
+      </div>
+      <div>
+        <label class="small">Telefone</label>
+        <input id="phone" placeholder="(11) 99999-9999">
+      </div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="small">Endereço completo</label>
+      <textarea id="address" placeholder="Rua, número, bairro, complemento..."></textarea>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <h1 style="font-size:18px;margin:0 0 10px 0">Resumo</h1>
+    <div id="items" class="small"></div>
+
+    <div style="margin-top:10px;border-top:1px solid #232323;padding-top:10px">
+      <div class="small">Subtotal: <b id="sub">R$ 0,00</b></div>
+      <div class="small">Entrega: <b id="fee">R$ 0,00</b></div>
+      <div class="small" style="margin-top:6px;font-size:16px">Total: <b id="total">R$ 0,00</b></div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" onclick="payWithMercadoPago()">Pagar pix, debito ou credito</button>
+      <button class="btn2" onclick="payOnDelivery()">Pagar na entrega</button>
+      <button class="btn2" onclick="clearCheckout()">Cancelar</button>
+    </div>
+
+    <p class="small" id="msg"></p>
+  </div>
+</div>
+
+<script>
+let payload = null;
+
+const SUPABASE_PROJECT_URL = "https://anbovljwbvljfhlydsxo.supabase.co";
+const MP_CREATE_PREF_URL = `${SUPABASE_PROJECT_URL}/functions/v1/mp-create-preference`;
+const MP_WEBHOOK_URL = `${SUPABASE_PROJECT_URL}/functions/v1/mp-webhook`;
+
+function setMsg(t){ document.querySelector("#msg").textContent = t || ""; }
+
+function calc(items, fee){
+  const subtotal = items.reduce((a,i)=>a + i.price_cents*i.qty, 0);
+  const total = subtotal + fee;
+  return { subtotal, total };
+}
+
+function render(){
+  payload = JSON.parse(localStorage.getItem("checkout_payload") || "null");
+  if (!payload || !payload.items?.length){
+    document.querySelector("#items").innerHTML = "Sem itens no checkout.";
+    return;
+  }
+
+  const slug = payload.store_slug || "";
+  document.querySelector("#btnBack").href = "./loja.html?slug=" + encodeURIComponent(slug);
+
+  const fee = payload.delivery_fee_cents || 500;
+  const { subtotal, total } = calc(payload.items, fee);
+
+  document.querySelector("#items").innerHTML = payload.items.map(i => `
+    <div style="padding:6px 0;border-bottom:1px solid #232323">
+      <b>${i.name}</b> — ${money(i.price_cents)} x ${i.qty}
+    </div>
+  `).join("");
+
+  document.querySelector("#sub").textContent = money(subtotal);
+  document.querySelector("#fee").textContent = money(fee);
+  document.querySelector("#total").textContent = money(total);
+}
+
+function validateCustomer(){
+  if (!payload || !payload.items?.length) throw new Error("Sem itens.");
+
+  const customer_name = document.querySelector("#name").value.trim();
+  const customer_phone = document.querySelector("#phone").value.trim();
+  const address = document.querySelector("#address").value.trim();
+
+  if (!customer_name) throw new Error("Informe seu nome");
+  if (!customer_phone) throw new Error("Informe seu telefone");
+  if (!address) throw new Error("Informe seu endereço");
+
+  return { customer_name, customer_phone, address };
+}
+
+function computeTotals(){
+  const fee = payload.delivery_fee_cents || 500;
+  const items_cents = payload.items.reduce((a,i)=>a + i.price_cents*i.qty, 0);
+  const total_cents = items_cents + fee;
+  return { fee, items_cents, total_cents };
+}
+
+async function createOrderRowWithId(orderId, { customer_name, customer_phone, address, fee, items_cents, total_cents }){
+  const { error } = await sb
+    .from("orders")
+    .insert({
+      id: orderId,
+      store_id: payload.store_id,
+      customer_name,
+      customer_phone,
+      address,
+      items_cents,
+      delivery_fee_cents: fee,
+      total_cents,
+      status: "novo",
+      payment_provider: "mercadopago",
+      payment_status: "pending"
+    });
+
+  if (error) throw error;
+}
+
+async function insertOrderItems(orderId){
+  const rows = payload.items.map(i => ({
+    order_id: orderId,
+    product_id: i.id,
+    name: i.name,
+    price_cents: i.price_cents,
+    qty: i.qty
+  }));
+
+  const { error } = await sb.from("order_items").insert(rows);
+  if (error) throw error;
+}
+
+async function callCreatePreference({ orderId, total_cents }) {
+  const baseUrl = location.origin + "/public";
+
+  const body = {
+    order_id: orderId,
+    total_cents: total_cents,
+    mode: "prod",
+    base_url: baseUrl,
+    notification_url: "https://anbovljwbvljfhlydsxo.supabase.co/functions/v1/mp-webhook",
+  };
+
+  console.log("ENVIANDO p/ mp-create-preference:", body);
+
+  const res = await fetch(MP_CREATE_PREF_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    console.error("mp-create-preference ERRO:", data);
+    alert("Erro mp-create-preference:\n" + JSON.stringify(data, null, 2));
+    throw new Error(data?.error || "Falha ao criar preferência");
+  }
+
+  return data;
+}
+
+async function payOnDelivery(){
+  try{
+    const { customer_name, customer_phone, address } = validateCustomer();
+    const { fee, items_cents, total_cents } = computeTotals();
+
+    // pergunta do troco
+    const totalReais = (total_cents / 100).toFixed(2).replace(".", ",");
+    let ans = prompt(
+      `Pagamento na entrega ✅\nTotal do pedido: R$ ${totalReais}\n\n` +
+      `Precisa de troco? Se sim, digite o valor que vai pagar.\n` +
+      `Ex: 50 ou 100\n` +
+      `Se não precisa, deixe vazio e clique OK.`
+    );
+
+    let cash_change_cents = null;
+
+    if (ans && String(ans).trim() !== "") {
+      ans = String(ans).replace(",", ".").trim();
+      const payValue = Number(ans);
+
+      if (!isFinite(payValue) || payValue <= 0) {
+        alert("Valor inválido.");
+        return;
+      }
+
+      const payCents = Math.round(payValue * 100);
+
+      if (payCents < total_cents) {
+        alert("O valor para pagamento não pode ser menor que o total do pedido.");
+        return;
+      }
+
+      cash_change_cents = payCents; // troco para esse valor
+    }
+
+    setMsg("Criando pedido (pagar na entrega)...");
+
+    // cria pedido
+    const { data, error } = await sb
+      .from("orders")
+      .insert({
+        store_id: payload.store_id,
+        customer_name,
+        customer_phone,
+        address,
+        items_cents,
+        delivery_fee_cents: fee,
+        total_cents,
+        status: "novo",
+        pay_on_delivery: true,
+        cash_change_cents: cash_change_cents,   // ✅ CORRIGIDO (antes estava changeForCents)
+        payment_provider: "cash",
+        payment_status: "cash"
+      })
+      .select("id")
+      .single();
+
+    if (error) throw error;
+
+    const orderId = data.id;
+
+    // items
+    await insertOrderItems(orderId);
+
+    // salvar tracking local
+    localStorage.setItem("last_order_id", orderId);
+    localStorage.setItem("last_store_slug", payload.store_slug || "");
+
+    // limpa carrinho e checkout
+    localStorage.removeItem("cart");
+    localStorage.removeItem("checkout_payload");
+
+    // vai para pedido.html acompanhar
+    location.href = "./pedido.html?order_id=" + encodeURIComponent(orderId) +
+                    "&slug=" + encodeURIComponent(payload.store_slug || "");
+
+  } catch(e){
+    alert(e?.message || e);
+    setMsg("");
+  }
+}
+
+async function payWithMercadoPago(){
+  try{
+    const { customer_name, customer_phone, address } = validateCustomer();
+    const { fee, items_cents, total_cents } = computeTotals();
+
+    if (!Number.isInteger(total_cents) || total_cents <= 0) {
+      alert("Total inválido. Verifique preços/itens.");
+      return;
+    }
+
+    setMsg("Criando pedido...");
+
+    const orderId = crypto.randomUUID();
+
+    // 1) cria pedido
+    await createOrderRowWithId(orderId, { customer_name, customer_phone, address, fee, items_cents, total_cents });
+
+    // 2) cria itens
+    await insertOrderItems(orderId);
+
+    setMsg("Gerando pagamento (Mercado Pago)...");
+
+    // 3) cria preferência MP
+    const pref = await callCreatePreference({ orderId, total_cents });
+
+    // 4) Redireciona
+    const url = pref.init_point;
+    if (!url) throw new Error("Mercado Pago não retornou init_point");
+
+    localStorage.setItem("last_order_id", orderId);
+    localStorage.setItem("last_store_slug", payload.store_slug || "");
+
+    localStorage.removeItem("cart");
+    localStorage.removeItem("checkout_payload");
+
+    const statusUrl = `${location.origin}/public/pedido.html?status=pending&order_id=${orderId}`;
+
+    // abre o status em outra aba (não depende do Mercado Pago voltar)
+    window.open(statusUrl, "_blank");
+
+    // ou, se preferir, só salva pra usar depois
+    localStorage.setItem("last_status_url", statusUrl);
+
+    window.location.href = url;
+  } catch(e){
+    alert(e?.message || e);
+    setMsg("");
+  }
+}
+
+function clearCheckout(){
+  const slug = payload?.store_slug || "";
+  localStorage.removeItem("checkout_payload");
+  location.href = "./loja.html?slug=" + encodeURIComponent(slug);
+}
+
+render();
+</script>
+</body>
+</html>
