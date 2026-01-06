@@ -295,7 +295,7 @@ async function payWithMercadoPago(){
     localStorage.removeItem("cart");
     localStorage.removeItem("checkout_payload");
 
-    const statusUrl = `${location.origin}/public/pedido.html?status=pending&order_id=${orderId}`;
+    const statusUrl = `${location.origin}/docs/pedido.html?status=pending&order_id=${orderId}`;
 
     // abre o status em outra aba (não depende do Mercado Pago voltar)
     window.open(statusUrl, "_blank");
