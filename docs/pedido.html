@@ -8,6 +8,93 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabaseClient.js"></script>
   <link rel="stylesheet" href="./styles.css" />
+
+  <style>
+    /* Extra (fica mais bonito sem depender do styles.css) */
+    .row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .pill {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid #2a2a2a;
+      background: rgba(255,255,255,.04);
+      opacity: .9;
+    }
+    .muted { opacity:.8; }
+    .divider { border-top:1px solid #232323; margin: 12px 0; }
+
+    .stepperWrap{
+      margin-top: 10px;
+      border: 1px solid #232323;
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(255,255,255,.02);
+      overflow:auto;
+    }
+    .stepper{
+      display:flex;
+      align-items:center;
+      gap: 12px;
+      min-width: 640px;
+    }
+    .step{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap: 8px;
+      min-width: 140px;
+      text-align:center;
+    }
+    .dot{
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      border: 2px solid rgba(255,255,255,.35);
+      background: transparent;
+    }
+    .label{
+      font-size: 13px;
+      opacity: .85;
+      font-weight: 650;
+    }
+    .line{
+      height: 2px;
+      width: 52px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+    }
+    .step.done .dot{
+      background: rgba(80,200,120,1);
+      border-color: rgba(80,200,120,1);
+    }
+    .step.active .dot{
+      background: rgba(120,180,255,1);
+      border-color: rgba(120,180,255,1);
+      box-shadow: 0 0 0 7px rgba(120,180,255,.14);
+    }
+    .step.done .label,
+    .step.active .label{
+      opacity: 1;
+      font-weight: 800;
+    }
+
+    .statusNote{
+      margin-top: 10px;
+      font-size: 13px;
+      opacity: .85;
+    }
+
+    .itemRow{
+      padding: 8px 0;
+      border-bottom: 1px solid #232323;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+    }
+    .itemRow b{ display:block; }
+    .itemRow .meta{ opacity:.8; font-size: 13px; margin-top: 2px; }
+  </style>
 </head>
 
 <body>
@@ -20,19 +107,55 @@
     </header>
 
     <div class="card" style="margin-top:12px">
-      <div class="small" id="hint" style="opacity:.85"></div>
+      <div class="row">
+        <div class="small muted" id="hint"></div>
+        <div id="lastUpdate" class="pill">Atualizando…</div>
+      </div>
 
       <div style="margin-top:10px">
         <div class="small">Pedido:</div>
         <div style="font-size:18px"><b id="orderIdTxt">—</b></div>
       </div>
 
-      <div style="margin-top:12px;border-top:1px solid #232323;padding-top:12px">
-        <div class="small">Pagamento:</div>
-        <div style="font-size:18px"><b id="payStatusTxt">—</b></div>
+      <div class="divider"></div>
 
-        <div class="small" style="margin-top:10px">Status do pedido:</div>
-        <div style="font-size:18px"><b id="orderStatusTxt">—</b></div>
+      <div class="row">
+        <div>
+          <div class="small">Pagamento:</div>
+          <div style="font-size:18px"><b id="payStatusTxt">—</b></div>
+        </div>
+        <div>
+          <div class="small">Status do pedido:</div>
+          <div style="font-size:18px"><b id="orderStatusTxt">—</b></div>
+        </div>
+      </div>
+
+      <!-- Etapas bonitas -->
+      <div class="stepperWrap">
+        <div class="small muted">Etapas do pedido</div>
+        <div class="stepper" id="stepper" style="margin-top:10px">
+          <div class="step" data-step="novo">
+            <div class="dot"></div>
+            <div class="label">Recebido</div>
+          </div>
+          <div class="line"></div>
+          <div class="step" data-step="preparando">
+            <div class="dot"></div>
+            <div class="label">Preparando</div>
+          </div>
+          <div class="line"></div>
+          <div class="step" data-step="saiu_para_entrega">
+            <div class="dot"></div>
+            <div class="label">Saiu para entrega</div>
+          </div>
+          <div class="line"></div>
+          <div class="step" data-step="entregue">
+            <div class="dot"></div>
+            <div class="label">Entregue</div>
+          </div>
+        </div>
+
+        <div id="statusNote" class="statusNote"></div>
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
@@ -63,6 +186,11 @@
 
     function setMsg(t){ document.querySelector("#msg").textContent = t || ""; }
 
+    function setLastUpdate(){
+      const now = new Date();
+      document.querySelector("#lastUpdate").textContent = `Atualizado: ${now.toLocaleTimeString()}`;
+    }
+
     function getBaseUrl() {
       const u = new URL(window.location.href);
       u.hash = "";
@@ -84,9 +212,9 @@
     // Mostra hint
     const hint = document.querySelector("#hint");
     if (hintedStatus) {
-      hint.textContent = `Pagamento iniciado (${hintedStatus}). Atualize para ver quando aprovar.`;
+      hint.textContent = `Pagamento iniciado (${hintedStatus}). O status vai atualizar automaticamente.`;
     } else {
-      hint.textContent = `Acompanhe aqui o status do seu pedido.`;
+      hint.textContent = `Acompanhe aqui o status do seu pedido. Atualiza automaticamente.`;
     }
 
     document.querySelector("#orderIdTxt").textContent = orderId || "Não informado";
@@ -106,7 +234,7 @@
     });
 
     function humanPayStatus(s){
-      const v = String(s || "").toLowerCase();
+      const v = String(s || "").toLowerCase().trim();
       if (v === "approved") return "✅ Aprovado";
       if (v === "pending") return "⏳ Pendente";
       if (v === "rejected") return "❌ Recusado";
@@ -117,18 +245,110 @@
       return v;
     }
 
+    // Normaliza status do pedido (aceita variações)
+    function normalizeOrderStatus(s){
+      const v = String(s || "").toLowerCase().trim();
+
+      // recebidos
+      if (["novo", "new", "created", "recebido"].includes(v)) return "novo";
+
+      // preparando
+      if (["preparando", "preparo", "fazendo", "em preparo", "preparing"].includes(v)) return "preparando";
+
+      // saiu para entrega (aceita várias formas)
+      if ([
+        "saiu_para_entrega",
+        "saiu para entrega",
+        "saiu-para-entrega",
+        "saiu",
+        "em rota",
+        "a caminho",
+        "out_for_delivery",
+        "out-for-delivery"
+      ].includes(v)) return "saiu_para_entrega";
+
+      // entregue
+      if (["entregue", "delivered", "finalizado", "concluido", "concluído"].includes(v)) return "entregue";
+
+      // cancelado
+      if (["cancelado", "cancelled", "canceled"].includes(v)) return "cancelado";
+
+      return v || "";
+    }
+
     function humanOrderStatus(s){
-      const v = String(s || "").toLowerCase();
-      if (v === "novo") return "🆕 Novo";
+      const v = normalizeOrderStatus(s);
+      if (v === "novo") return "🆕 Recebido";
       if (v === "preparando") return "🍳 Preparando";
       if (v === "saiu_para_entrega") return "🛵 Saiu para entrega";
       if (v === "entregue") return "✅ Entregue";
-      if (v === "cancelado" || v === "cancelled") return "❌ Cancelado";
+      if (v === "cancelado") return "❌ Cancelado";
       if (!v) return "—";
       return v;
     }
 
+    // Stepper (etapas)
+    const stepOrder = ["novo", "preparando", "saiu_para_entrega", "entregue"];
+
+    function renderStepper(currentStatus){
+      const norm = normalizeOrderStatus(currentStatus);
+
+      // Se cancelado, não marca etapas (e mostra mensagem)
+      if (norm === "cancelado") {
+        document.querySelectorAll(".step").forEach(s => s.classList.remove("done", "active"));
+        document.querySelector("#statusNote").textContent = "Pedido cancelado.";
+        return;
+      }
+
+      const idx = stepOrder.indexOf(norm);
+      const safeIdx = idx >= 0 ? idx : 0;
+
+      document.querySelectorAll(".step").forEach(step => {
+        const key = step.getAttribute("data-step");
+        const i = stepOrder.indexOf(key);
+
+        step.classList.remove("done", "active");
+        if (i < safeIdx) step.classList.add("done");
+        if (i === safeIdx) step.classList.add("active");
+      });
+
+      const noteMap = {
+        novo: "Pedido recebido pela loja.",
+        preparando: "Estamos preparando seu pedido.",
+        saiu_para_entrega: "Motoboy saiu para entrega.",
+        entregue: "Pedido entregue. Bom apetite! 🍔"
+      };
+      document.querySelector("#statusNote").textContent = noteMap[stepOrder[safeIdx]] || "";
+    }
+
+    // Auto-refresh
+    const REFRESH_EVERY_MS = 10000;
     let timer = null;
+
+    function shouldKeepRefreshing(order){
+      const ps = String(order?.payment_status || "").toLowerCase().trim();
+      const st = normalizeOrderStatus(order?.status);
+
+      // Para quando finaliza
+      if (st === "entregue" || st === "cancelado") return false;
+
+      // Se quiser, dá pra manter sempre até entregue/cancelado.
+      // Mesmo que payment esteja aprovado/cash, ainda pode mudar status do pedido.
+      return true;
+    }
+
+    function startAuto(){
+      if (timer) return;
+      timer = setInterval(() => {
+        if (document.visibilityState === "visible") load();
+      }, REFRESH_EVERY_MS);
+    }
+
+    function stopAuto(){
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+    }
 
     async function load(){
       try{
@@ -154,47 +374,61 @@
         const { data: items, error: e2 } = await sb
           .from("order_items")
           .select("*")
-          .eq("order_id", orderId)
-          .order("created_at", { ascending: true });
+          .eq("order_id", orderId);
 
         if (e2) throw e2;
 
-        // render
+        // render textos
         document.querySelector("#payStatusTxt").textContent = humanPayStatus(order.payment_status);
         document.querySelector("#orderStatusTxt").textContent = humanOrderStatus(order.status);
 
+        // render stepper bonito
+        renderStepper(order.status);
+
+        // totais
         const fee = order.delivery_fee_cents || 0;
-        const subtotal = (order.items_cents != null) ? order.items_cents : (Number(order.total_cents || 0) - Number(fee || 0));
+        const subtotal = (order.items_cents != null)
+          ? order.items_cents
+          : (Number(order.total_cents || 0) - Number(fee || 0));
+
         document.querySelector("#sub").textContent = money(subtotal);
         document.querySelector("#fee").textContent = money(fee);
         document.querySelector("#total").textContent = money(order.total_cents);
 
+        // itens melhor formatado
         document.querySelector("#items").innerHTML = (items && items.length)
           ? items.map(i => `
-              <div style="padding:6px 0;border-bottom:1px solid #232323">
-                <b>${i.name}</b> — ${money(i.price_cents)} x ${i.qty}
+              <div class="itemRow">
+                <div>
+                  <b>${i.name}</b>
+                  <div class="meta">${money(i.price_cents)} x ${i.qty}</div>
+                </div>
+                <div><b>${money(Number(i.price_cents || 0) * Number(i.qty || 1))}</b></div>
               </div>
             `).join("")
           : "Nenhum item encontrado.";
 
+        setLastUpdate();
         setMsg("Atualizado.");
 
-        // auto-refresh enquanto pendente
-        const ps = String(order.payment_status || "").toLowerCase();
-        if (ps === "pending" || ps === "in_process") {
-          if (!timer) timer = setInterval(load, 10000);
-        } else {
-          if (timer) { clearInterval(timer); timer = null; }
-        }
+        // controla auto-refresh
+        if (shouldKeepRefreshing(order)) startAuto();
+        else stopAuto();
 
       } catch(err){
         console.error(err);
         setMsg("Erro ao carregar: " + (err?.message || err));
-        if (timer) { clearInterval(timer); timer = null; }
+        stopAuto();
       }
     }
 
+    // Atualiza quando volta pra aba
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") load();
+    });
+
     load();
+    startAuto(); // começa já, e a função load decide parar quando finalizar
   </script>
 </body>
 </html>

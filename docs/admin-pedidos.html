@@ -8,6 +8,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabaseClient.js"></script>
   <link rel="stylesheet" href="./styles.css">
+
+  <!-- ✅ NOVO: estilo do destaque amarelo para pedido novo -->
+  <style>
+    .new-order {
+      border-color: rgba(255, 210, 0, .75) !important;
+      background: rgba(255, 210, 0, .14) !important;
+      box-shadow: 0 0 0 2px rgba(255, 210, 0, .10) inset;
+    }
+  </style>
 </head>
 
 <audio id="notifySound" preload="auto">
@@ -57,6 +66,12 @@ let tmr = null;
 let soundEnabled = localStorage.getItem("sound_enabled") === "1";
 let audioCtx = null;
 
+/* ✅ NOVO: controle de pedidos novos */
+let knownOrderIds = new Set();    // ids já conhecidos (pra detectar novos)
+let newOrderIds = new Set();      // ids marcados como "novo pedido"
+let initialized = false;          // evita marcar tudo no primeiro load
+let newAlertTimer = null;         // timer do aviso repetido
+
 function updateSoundBtn(){
   document.querySelector("#soundBtn").textContent =
     soundEnabled ? "Som ativado ✅" : "Ativar som";
@@ -68,6 +83,7 @@ function toggleSound(){
   updateSoundBtn();
   if (soundEnabled && !audioCtx)
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try { audioCtx?.resume?.(); } catch {}
 }
 
 function beep(){
@@ -83,6 +99,59 @@ function beep(){
     setTimeout(() => o.stop(), 180);
   } catch {}
 }
+
+/* ✅ NOVO: fala "Um pedido novo" */
+function speakNewOrder(){
+  if (!soundEnabled) return;
+
+  // tenta tocar um beep curtinho também (ajuda a chamar atenção)
+  try { document.querySelector("#notifySound")?.play?.().catch(()=>{}); } catch {}
+  try { beep(); } catch {}
+
+  // fala
+  try{
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance("Um pedido novo");
+    u.lang = "pt-BR";
+    u.rate = 1;
+    u.pitch = 1;
+    window.speechSynthesis.speak(u);
+  } catch {}
+}
+
+/* ✅ NOVO: começa a notificação repetida até usuário agir */
+function startNewOrderAlert(){
+  if (newAlertTimer) return;
+  speakNewOrder();
+  newAlertTimer = setInterval(() => {
+    // só repete se ainda existir pedido novo pendente de “ack”
+    if (newOrderIds.size > 0) speakNewOrder();
+  }, 7000);
+}
+
+/* ✅ NOVO: para som e remove destaque */
+function stopNewOrderAlert(){
+  if (newAlertTimer){
+    clearInterval(newAlertTimer);
+    newAlertTimer = null;
+  }
+  try { window.speechSynthesis?.cancel?.(); } catch {}
+}
+
+function clearNewOrderState(){
+  newOrderIds.clear();
+  stopNewOrderAlert();
+  // remove a classe sem precisar recarregar
+  document.querySelectorAll(".new-order").forEach(el => el.classList.remove("new-order"));
+}
+
+/* ✅ NOVO: qualquer ação do usuário “ack” e para o som */
+["click","keydown","touchstart"].forEach(evt => {
+  document.addEventListener(evt, () => {
+    if (newOrderIds.size > 0) clearNewOrderState();
+  }, { passive:true });
+});
 
 function debouncedReload(){
   clearTimeout(tmr);
@@ -136,6 +205,9 @@ async function setStatus(orderId, status){
 async function reload(userAction=false){
   if (!store) return;
 
+  /* ✅ NOVO: se foi ação do usuário, “ack” */
+  if (userAction && newOrderIds.size > 0) clearNewOrderState();
+
   const status = document.querySelector("#statusFilter").value;
   const q = document.querySelector("#q").value.trim().toLowerCase();
 
@@ -160,9 +232,23 @@ async function reload(userAction=false){
     );
   }
 
+  /* ✅ NOVO: detecta pedidos novos apenas após inicialização e no auto refresh */
+  if (initialized && !userAction){
+    const justArrived = rows.filter(o => !knownOrderIds.has(o.id));
+    if (justArrived.length){
+      justArrived.forEach(o => newOrderIds.add(o.id));
+      startNewOrderAlert();
+    }
+  }
+
+  // mantém memória dos ids vistos (união)
+  rows.forEach(o => knownOrderIds.add(o.id));
+
   render(rows);
   document.querySelector("#auto").textContent =
     `Auto atualização: 10s • Som: ${soundEnabled ? "ON" : "OFF"}`;
+
+  return rows;
 }
 
 function render(rows){
@@ -177,8 +263,11 @@ function render(rows){
       `<div class="small">• ${i.name} — ${money(i.price_cents)} x ${i.qty}</div>`
     ).join("");
 
+    // ✅ NOVO: aplica destaque amarelo se estiver marcado como "novo pedido"
+    const newClass = newOrderIds.has(o.id) ? " new-order" : "";
+
     return `
-      <div class="card" style="margin-bottom:12px">
+      <div class="card${newClass}" style="margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap">
           <div>
             <b>Pedido ${o.id.slice(0,6)}</b> • ${badge(o.status)}
@@ -224,13 +313,17 @@ function render(rows){
   try{
     await ensureStore();
     updateSoundBtn();
-    await reload(true);
+
+    // ✅ NOVO: primeiro load não marca como “novo”
+    const firstRows = await reload(true);
+    knownOrderIds = new Set((firstRows || []).map(o => o.id));
+    initialized = true;
+
     setInterval(()=>reload(false), 10000);
   }catch(e){
     alert(e.message);
   }
 })();
-
 </script>
 </body>
 </html>
