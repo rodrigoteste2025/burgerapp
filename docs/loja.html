@@ -6,6 +6,38 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./supabaseClient.js"></script>
   <link rel="stylesheet" href="./styles.css">
+
+  <!-- ✅ CSS extra só para deixar carrinho sempre visível e layout melhor -->
+  <style>
+    .page{
+      display:grid;
+      grid-template-columns: 1fr 360px;
+      gap:16px;
+      align-items:start;
+    }
+    .cartSticky{
+      position: sticky;
+      top: 12px;
+      height: calc(100vh - 24px);
+      overflow:auto;
+    }
+    .qtyBox{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-top:10px;
+      flex-wrap:wrap;
+    }
+    .qtyBox span{
+      min-width:26px;
+      text-align:center;
+      font-weight:800;
+    }
+    @media (max-width: 900px){
+      .page{ grid-template-columns: 1fr; }
+      .cartSticky{ position: relative; height:auto; top:0; }
+    }
+  </style>
 </head>
 
 <div id="trackBox" class="card" style="display:none;margin-bottom:12px">
@@ -20,40 +52,45 @@
   </div>
 </div>
 
-
 <body>
 
-  
 <div class="container">
   <header style="align-items:flex-start">
     <div>
       <h1 id="title">Cardápio</h1>
       <div class="small" id="subtitle"></div>
     </div>
+
+    <!-- ✅ agora o botão só "leva até o carrinho" -->
     <div style="display:flex;gap:10px;align-items:center">
       <button class="btn2" onclick="toggleCart()">Carrinho (<span id="cartCount">0</span>)</button>
     </div>
   </header>
 
-  <div class="card" id="cartBox" style="display:nome;margin-bottom:12px">
-    <h1 style="font-size:18px;margin:0 0 10px 0">Seu carrinho</h1>
-
-    <div id="cartItems" class="small"></div>
-
-    <div style="margin-top:10px;border-top:1px solid #232323;padding-top:10px">
-      <div class="small">Subtotal: <b id="subTotal">R$ 0,00</b></div>
-      <div class="small">Entrega: <b id="deliveryFee">R$ 0,00</b></div>
-      <div class="small" style="margin-top:6px;font-size:16px">Total: <b id="total">R$ 0,00</b></div>
+  <!-- ✅ Layout novo: produtos à esquerda e carrinho sempre aberto à direita -->
+  <div class="page">
+    <div>
+      <div class="grid" id="list"></div>
     </div>
 
-    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn2" onclick="clearCart()">Limpar</button>
-      <button class="btn" onclick="goCheckout()">Finalizar pedido</button>
-      <button class="btn2" onclick="toggleCart()">Fechar</button>
+    <!-- ✅ Carrinho sempre visível -->
+    <div class="card cartSticky" id="cartBox" style="display:block;margin-bottom:12px">
+      <h1 style="font-size:18px;margin:0 0 10px 0">Seu carrinho</h1>
+
+      <div id="cartItems" class="small"></div>
+
+      <div style="margin-top:10px;border-top:1px solid #232323;padding-top:10px">
+        <div class="small">Subtotal: <b id="subTotal">R$ 0,00</b></div>
+        <div class="small">Entrega: <b id="deliveryFee">R$ 0,00</b></div>
+        <div class="small" style="margin-top:6px;font-size:16px">Total: <b id="total">R$ 0,00</b></div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn2" onclick="clearCart()">Limpar</button>
+        <button class="btn" onclick="goCheckout()">Finalizar pedido</button>
+      </div>
     </div>
   </div>
-
-  <div class="grid" id="list"></div>
 </div>
 
 <script>
@@ -63,6 +100,23 @@ let cart = []; // {id, name, price_cents, qty}
 
 function qs(k){ return new URLSearchParams(location.search).get(k); }
 function setText(sel, val){ document.querySelector(sel).textContent = val; }
+
+/** ✅ id seguro para usar em id="" do HTML */
+function domIdFromProductId(id){
+  return "qty_" + String(id).replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getQty(id){
+  const it = cart.find(i => i.id === id);
+  return it ? it.qty : 0;
+}
+
+function updateQtyBadges(){
+  for (const p of products){
+    const el = document.getElementById(domIdFromProductId(p.id));
+    if (el) el.textContent = String(getQty(p.id));
+  }
+}
 
 function loadCart(){
   try { cart = JSON.parse(localStorage.getItem("cart") || "[]"); }
@@ -97,10 +151,15 @@ function addMore(id){
   renderCart();
 }
 
+/**
+ * ✅ Antes isso abria/fechava o carrinho.
+ * Agora o carrinho fica sempre aberto, então esse botão só rola a tela até ele.
+ */
 function toggleCart(){
   const box = document.querySelector("#cartBox");
-  box.style.display = (box.style.display === "none") ? "block" : "none";
-  if (box.style.display === "block") renderCart();
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  renderCart();
 }
 
 function clearCart(){
@@ -125,6 +184,7 @@ function renderCart(){
     setText("#subTotal", money(0));
     setText("#deliveryFee", money(fee));
     setText("#total", money(fee));
+    updateQtyBadges();
     return;
   }
 
@@ -136,6 +196,7 @@ function renderCart(){
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn2" onclick="removeOne('${i.id}')">-</button>
+        <b>${i.qty}</b>
         <button class="btn2" onclick="addMore('${i.id}')">+</button>
       </div>
     </div>
@@ -145,15 +206,15 @@ function renderCart(){
   setText("#subTotal", money(subtotal));
   setText("#deliveryFee", money(fee));
   setText("#total", money(total));
+  updateQtyBadges();
 }
 
 function goCheckout(){
   if (!cart.length) return alert("Seu carrinho está vazio.");
-    if (store && store.is_open === false) {
+  if (store && store.is_open === false) {
     alert("A loja está fechada no momento. Volte no horário de funcionamento.");
     return;
   }
-  
 
   const payload = {
     store_id: store.id,
@@ -225,6 +286,7 @@ async function loadStoreAndProducts(){
 
   products = await attachSignedUrls(ps || []);
   renderProducts();
+  renderCart(); // ✅ já carrega carrinho aberto
 }
 
 function renderProducts(){
@@ -239,6 +301,7 @@ function renderProducts(){
     const safeId = String(p.id).replace(/"/g,"&quot;");
     const safeName = String(p.name).replace(/</g,"&lt;").replace(/>/g,"&gt;");
     const imgSrc = p._imgUrl || "";
+    const qtyDomId = domIdFromProductId(p.id);
 
     return `
       <div class="card">
@@ -247,20 +310,22 @@ function renderProducts(){
         <div class="small">${p.description || ""}</div>
         <div class="price" style="margin-top:8px">${money(p.price_cents)}</div>
 
-        <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn" onclick='addToCartItem("${safeId}", ${JSON.stringify(p.name).replace(/'/g,"&#39;")}, ${p.price_cents})'>Adicionar</button>
-          <button class="btn2" onclick="toggleCart()">Ver carrinho</button>
+        <!-- ✅ mais fácil: - qty + -->
+        <div class="qtyBox">
+          <button class="btn2" onclick="removeOne('${safeId}')">-</button>
+          <span id="${qtyDomId}">${getQty(p.id)}</span>
+          <button class="btn2" onclick="addMore('${safeId}')">+</button>
         </div>
       </div>
     `;
   }).join("");
+
+  updateQtyBadges();
 }
 
 loadCart();
 loadStoreAndProducts();
-
-
-
+renderCart();
 </script>
 
 <script>
@@ -290,8 +355,5 @@ loadStoreAndProducts();
   }
 })();
 </script>
-
-
-
 
 </body></html>

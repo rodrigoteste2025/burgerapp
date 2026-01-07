@@ -3,195 +3,198 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Status do Pedido</title>
-  <link rel="stylesheet" href="./styles.css">
-  <style>
-    .center { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
-    .box { width: 520px; max-width: 100%; background:#111; border:1px solid #232323; border-radius:16px; padding:22px; }
-    .title { font-size:28px; margin:0 0 12px; }
-    .pill { padding:14px 16px; border-radius:12px; font-weight:700; text-align:center; margin:14px 0; }
-    .muted { opacity:.85; font-size:14px; }
-    .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
-    .btn { padding:10px 14px; border-radius:10px; border:0; cursor:pointer; }
-    .btn2 { padding:10px 14px; border-radius:10px; border:1px solid #333; background:transparent; cursor:pointer; color:#fff; }
-    .ok { background:#1f8f3a; }
-    .pend { background:#b58800; }
-    .bad { background:#a12a2a; }
-    .small { font-size:13px; opacity:.85; }
-    code { background:#000; padding:2px 6px; border-radius:6px; }
-  </style>
+  <title>Status do pedido</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./supabaseClient.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
 </head>
+
 <body>
-  <div class="center">
-    <div class="box">
-      <h1 class="title">Pedido recebido</h1>
+  <div class="container">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <h1 style="margin:0">Status do pedido</h1>
+      <a id="btnBackStore" class="btn2" href="./loja.html" style="text-decoration:none;padding:10px 12px;border-radius:10px;display:inline-block">
+        Voltar para loja
+      </a>
+    </header>
 
-      <div id="pill" class="pill pend">Verificando pagamento…</div>
+    <div class="card" style="margin-top:12px">
+      <div class="small" id="hint" style="opacity:.85"></div>
 
-      <div class="muted">
-        Pedido: <code id="orderIdTxt">-</code>
+      <div style="margin-top:10px">
+        <div class="small">Pedido:</div>
+        <div style="font-size:18px"><b id="orderIdTxt">—</b></div>
       </div>
 
-      <div id="details" class="small" style="margin-top:10px;"></div>
+      <div style="margin-top:12px;border-top:1px solid #232323;padding-top:12px">
+        <div class="small">Pagamento:</div>
+        <div style="font-size:18px"><b id="payStatusTxt">—</b></div>
 
-      <div class="row">
-        <button class="btn2" id="btnStore">Voltar para loja</button>
-        <button class="btn2" onclick="forceRefresh()">Atualizar agora</button>
+        <div class="small" style="margin-top:10px">Status do pedido:</div>
+        <div style="font-size:18px"><b id="orderStatusTxt">—</b></div>
       </div>
 
-      <div class="small" style="margin-top:10px;">
-        <span id="lastCheck">Aguardando…</span>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        <button class="btn2" id="btnRefresh">Atualizar agora</button>
+        <button class="btn2" id="btnCopy">Copiar número do pedido</button>
+      </div>
+
+      <p class="small" id="msg" style="margin-top:10px"></p>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2 style="font-size:18px;margin:0 0 10px 0">Itens</h2>
+      <div id="items" class="small">—</div>
+
+      <div style="margin-top:10px;border-top:1px solid #232323;padding-top:10px">
+        <div class="small">Subtotal: <b id="sub">R$ 0,00</b></div>
+        <div class="small">Entrega: <b id="fee">R$ 0,00</b></div>
+        <div class="small" style="margin-top:6px;font-size:16px">Total: <b id="total">R$ 0,00</b></div>
       </div>
     </div>
   </div>
 
-<script>
-  // ✅ seu projeto supabase
-  const SUPABASE_PROJECT_URL = "https://anbovljwbvljfhlydsxo.supabase.co";
-  const ORDER_STATUS_URL = `${SUPABASE_PROJECT_URL}/functions/v1/order-status`;
+  <script>
+    function money(cents){
+      const v = (Number(cents || 0) / 100);
+      return v.toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
+    }
 
-  const params = new URLSearchParams(location.search);
-  const orderIdFromUrl = params.get("order_id");
-  const orderIdFromLs = localStorage.getItem("last_order_id");
-  const orderId = orderIdFromUrl || orderIdFromLs;
+    function setMsg(t){ document.querySelector("#msg").textContent = t || ""; }
 
-  const storeSlug = params.get("slug") || localStorage.getItem("last_store_slug") || "";
+    function getBaseUrl() {
+      const u = new URL(window.location.href);
+      u.hash = "";
+      u.search = "";
+      u.pathname = u.pathname.replace(/[^\/]*$/, "");
+      return (u.origin + u.pathname).replace(/\/$/, "");
+    }
+    const BASE_URL = getBaseUrl();
 
-  const pill = document.getElementById("pill");
-  const orderIdTxt = document.getElementById("orderIdTxt");
-  const details = document.getElementById("details");
-  const lastCheck = document.getElementById("lastCheck");
-  const btnStore = document.getElementById("btnStore");
+    const qs = new URLSearchParams(location.search);
+    let orderId = qs.get("order_id") || localStorage.getItem("last_order_id") || "";
+    let slug = qs.get("slug") || localStorage.getItem("last_store_slug") || "";
+    const hintedStatus = qs.get("status") || "";
 
-  btnStore.onclick = () => {
-    const url = "./loja.html" + (storeSlug ? ("?slug=" + encodeURIComponent(storeSlug)) : "");
-    location.href = url;
-  };
+    // Botão voltar loja
+    const btnBackStore = document.querySelector("#btnBackStore");
+    btnBackStore.href = `${BASE_URL}/loja.html?slug=${encodeURIComponent(slug)}`;
 
-  if (!orderId) {
-    pill.className = "pill bad";
-    pill.textContent = "Pedido não encontrado";
-    details.textContent = "Abra esta página com ?order_id=SEU_UUID (ou gere um pedido pelo checkout).";
-  } else {
-    orderIdTxt.textContent = orderId;
-    startPolling();
-  }
+    // Mostra hint
+    const hint = document.querySelector("#hint");
+    if (hintedStatus) {
+      hint.textContent = `Pagamento iniciado (${hintedStatus}). Atualize para ver quando aprovar.`;
+    } else {
+      hint.textContent = `Acompanhe aqui o status do seu pedido.`;
+    }
 
-  let timer = null;
+    document.querySelector("#orderIdTxt").textContent = orderId || "Não informado";
 
-  function setState(type, text) {
-    pill.className = "pill " + type;
-    pill.textContent = text;
-  }
-
-  function nowStr() {
-    const d = new Date();
-    return d.toLocaleTimeString();
-  }
-
-  async function fetchStatus() {
-    lastCheck.textContent = "Consultando status… " + nowStr();
-
-    const res = await fetch(`${ORDER_STATUS_URL}?order_id=${encodeURIComponent(orderId)}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" }
+    document.querySelector("#btnCopy").addEventListener("click", async () => {
+      try {
+        if (!orderId) return alert("Sem número do pedido.");
+        await navigator.clipboard.writeText(orderId);
+        alert("Número do pedido copiado!");
+      } catch (e) {
+        alert("Não foi possível copiar automaticamente. Copie manualmente: " + orderId);
+      }
     });
 
-    const data = await res.json().catch(() => ({}));
+    document.querySelector("#btnRefresh").addEventListener("click", () => {
+      load();
+    });
 
-    if (!res.ok) {
-      setState("bad", "Erro ao consultar pedido");
-      details.textContent = JSON.stringify(data, null, 2);
-      lastCheck.textContent = "Última tentativa: " + nowStr();
-      return null;
+    function humanPayStatus(s){
+      const v = String(s || "").toLowerCase();
+      if (v === "approved") return "✅ Aprovado";
+      if (v === "pending") return "⏳ Pendente";
+      if (v === "rejected") return "❌ Recusado";
+      if (v === "cancelled" || v === "canceled") return "❌ Cancelado";
+      if (v === "in_process") return "⏳ Em análise";
+      if (v === "cash") return "💵 Pagamento na entrega";
+      if (!v) return "—";
+      return v;
     }
 
-    lastCheck.textContent = "Última verificação: " + nowStr();
-    return data;
-  }
-
-  function brlFromCents(cents){
-    const v = Number(cents || 0) / 100;
-    return "R$ " + v.toFixed(2).replace(".", ",");
-  }
-
-  function renderStatus(data) {
-    const ps = (data?.payment_status || "pending").toLowerCase();
-    const st = (data?.status || "novo").toLowerCase();
-
-    // ✅ NOVO: pagar na entrega
-    const payOnDelivery = data?.pay_on_delivery === true;
-
-    // ✅ TRATE "paid" COMO APROVADO
-    const isPaid = (ps === "paid" || ps === "approved");
-    const isPending = (ps === "pending" || ps === "in_process");
-    const isRejected = (ps === "rejected" || ps === "cancelled" || ps === "refunded" || ps === "charged_back");
-
-    // ✅ Se for "pagar na entrega", não é pendente MP
-    if (payOnDelivery) {
-      setState("ok", "Pagamento na entrega ✅");
-      details.innerHTML = `
-        <div>Status do pagamento: <b>na entrega</b></div>
-        <div>Etapa do pedido: <b>${st}</b></div>
-        <div>Total: <b>${brlFromCents(data.total_cents)}</b></div>
-        <div style="margin-top:8px"><b>Você vai pagar no ato da entrega 💵</b></div>
-      `;
-      // ✅ não precisa ficar consultando Mercado Pago
-      stopPolling();
-      return;
+    function humanOrderStatus(s){
+      const v = String(s || "").toLowerCase();
+      if (v === "novo") return "🆕 Novo";
+      if (v === "preparando") return "🍳 Preparando";
+      if (v === "saiu_para_entrega") return "🛵 Saiu para entrega";
+      if (v === "entregue") return "✅ Entregue";
+      if (v === "cancelado" || v === "cancelled") return "❌ Cancelado";
+      if (!v) return "—";
+      return v;
     }
 
-    if (isPaid) {
-      setState("ok", "Pagamento aprovado ✅");
-      details.innerHTML = `
-        <div>Status do pagamento: <b>${ps}</b></div>
-        <div>Etapa do pedido: <b>${st}</b></div>
-        <div>Total: <b>${brlFromCents(data.total_cents)}</b></div>
-        <div style="margin-top:8px"><b>Agora a loja vai preparar seu pedido 🍔</b></div>
-      `;
-      // ✅ quando já está pago, pode parar de consultar (opcional)
-      stopPolling();
-      return;
+    let timer = null;
+
+    async function load(){
+      try{
+        if (!orderId){
+          setMsg("❗ Nenhum order_id encontrado. Volte para a loja e finalize um pedido.");
+          return;
+        }
+
+        setMsg("Carregando pedido...");
+        document.querySelector("#payStatusTxt").textContent = "…";
+        document.querySelector("#orderStatusTxt").textContent = "…";
+
+        // 1) pedido
+        const { data: order, error: e1 } = await sb
+          .from("orders")
+          .select("*")
+          .eq("id", orderId)
+          .single();
+
+        if (e1) throw e1;
+
+        // 2) itens
+        const { data: items, error: e2 } = await sb
+          .from("order_items")
+          .select("*")
+          .eq("order_id", orderId)
+          .order("created_at", { ascending: true });
+
+        if (e2) throw e2;
+
+        // render
+        document.querySelector("#payStatusTxt").textContent = humanPayStatus(order.payment_status);
+        document.querySelector("#orderStatusTxt").textContent = humanOrderStatus(order.status);
+
+        const fee = order.delivery_fee_cents || 0;
+        const subtotal = (order.items_cents != null) ? order.items_cents : (Number(order.total_cents || 0) - Number(fee || 0));
+        document.querySelector("#sub").textContent = money(subtotal);
+        document.querySelector("#fee").textContent = money(fee);
+        document.querySelector("#total").textContent = money(order.total_cents);
+
+        document.querySelector("#items").innerHTML = (items && items.length)
+          ? items.map(i => `
+              <div style="padding:6px 0;border-bottom:1px solid #232323">
+                <b>${i.name}</b> — ${money(i.price_cents)} x ${i.qty}
+              </div>
+            `).join("")
+          : "Nenhum item encontrado.";
+
+        setMsg("Atualizado.");
+
+        // auto-refresh enquanto pendente
+        const ps = String(order.payment_status || "").toLowerCase();
+        if (ps === "pending" || ps === "in_process") {
+          if (!timer) timer = setInterval(load, 10000);
+        } else {
+          if (timer) { clearInterval(timer); timer = null; }
+        }
+
+      } catch(err){
+        console.error(err);
+        setMsg("Erro ao carregar: " + (err?.message || err));
+        if (timer) { clearInterval(timer); timer = null; }
+      }
     }
 
-    if (isRejected) {
-      setState("bad", "Pagamento recusado ❌");
-      details.innerHTML = `
-        <div>Status do pagamento: <b>${ps}</b></div>
-        <div>Etapa do pedido: <b>${st}</b></div>
-        <div style="margin-top:8px">Tente novamente ou escolha outro meio de pagamento.</div>
-      `;
-      stopPolling();
-      return;
-    }
-
-    // default pendente (Mercado Pago)
-    setState("pend", "Pagamento pendente ⏳");
-    details.innerHTML = `
-      <div>Status do pagamento: <b>${ps}</b></div>
-      <div>Etapa do pedido: <b>${st}</b></div>
-      <div style="margin-top:8px">Aguardando confirmação do Mercado Pago…</div>
-    `;
-  }
-
-  async function tick() {
-    const data = await fetchStatus();
-    if (data) renderStatus(data);
-  }
-
-  function startPolling() {
-    tick();
-    timer = setInterval(tick, 3000);
-  }
-
-  function stopPolling() {
-    if (timer) clearInterval(timer);
-    timer = null;
-  }
-
-  function forceRefresh() {
-    tick();
-  }
-</script>
+    load();
+  </script>
 </body>
 </html>
