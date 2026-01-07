@@ -149,7 +149,7 @@ async function insertOrderItems(orderId){
 }
 
 async function callCreatePreference({ orderId, total_cents }) {
-  const baseUrl = location.origin + "/public";
+  const baseUrl = location.origin + "/burgerapp/";
 
   const body = {
     order_id: orderId,
@@ -251,7 +251,7 @@ async function payOnDelivery(){
     localStorage.removeItem("checkout_payload");
 
     // vai para pedido.html acompanhar
-    location.href = "./pedido.html?order_id=" + encodeURIComponent(orderId) +
+    location.href = "./loja.html?order_id=" + encodeURIComponent(orderId) +
                     "&slug=" + encodeURIComponent(payload.store_slug || "");
 
   } catch(e){
